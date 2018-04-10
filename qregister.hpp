@@ -48,7 +48,7 @@ enum CoherentUnitEngine {
 };
 
 /** Create a CoherentUnit leveraging the specified engine. */
-CoherentUnit* CreateCoherentUnit(CoherentUnitEngine engine, bitLenInt qBitCount, bitCapInt initState);
+CoherentUnit* CreateCoherentUnit(CoherentUnitEngine engine, bitLenInt qBitCount, bitCapInt initState, Complex16 phaseFac);
 
 /**
  * A "Qrack::CoherentUnit" is a qubit permutation state vector with methods to
