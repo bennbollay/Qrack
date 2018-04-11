@@ -18,13 +18,23 @@
 
 #include "oclengine.hpp"
 
-#include "par_for.hpp"
-
 namespace Qrack {
 
 /* Modified constructors with the addition of InitOCL(). */
 CoherentUnitOCL::CoherentUnitOCL(bitLenInt qBitCount)
     : CoherentUnit(qBitCount)
+{
+    InitOCL();
+}
+
+CoherentUnitOCL::CoherentUnitOCL(bitLenInt qBitCount, Complex16 phaseFac)
+    : CoherentUnit(qBitCount, phaseFac)
+{
+    InitOCL();
+}
+
+CoherentUnitOCL::CoherentUnitOCL(bitLenInt qBitCount, std::shared_ptr<std::default_random_engine> rgp)
+    : CoherentUnit(qBitCount, rgp)
 {
     InitOCL();
 }
@@ -35,7 +45,33 @@ CoherentUnitOCL::CoherentUnitOCL(bitLenInt qBitCount, bitCapInt initState)
     InitOCL();
 }
 
+CoherentUnitOCL::CoherentUnitOCL(bitLenInt qBitCount, bitCapInt initState, Complex16 phaseFac)
+    : CoherentUnit(qBitCount, initState, phaseFac)
+{
+    InitOCL();
+}
+
+CoherentUnitOCL::CoherentUnitOCL(
+    bitLenInt qBitCount, bitCapInt initState, std::shared_ptr<std::default_random_engine> rgp)
+    : CoherentUnit(qBitCount, initState, rgp)
+{
+    InitOCL();
+}
+
+CoherentUnitOCL::CoherentUnitOCL(
+    bitLenInt qBitCount, bitCapInt initState, Complex16 phaseFac, std::shared_ptr<std::default_random_engine> rgp)
+    : CoherentUnit(qBitCount, initState, phaseFac, rgp)
+{
+    InitOCL();
+}
+
 CoherentUnitOCL::CoherentUnitOCL(const CoherentUnitOCL& pqs)
+    : CoherentUnit(pqs)
+{
+    InitOCL();
+}
+
+CoherentUnitOCL::CoherentUnitOCL(const CoherentUnit& pqs)
     : CoherentUnit(pqs)
 {
     InitOCL();
@@ -222,6 +258,7 @@ void CoherentUnitOCL::DECC(
     bool hasCarry = M(carryIndex);
     if (hasCarry) {
         X(carryIndex);
+    } else {
         toSub++;
     }
     bitCapInt carryMask = 1 << carryIndex;
@@ -355,10 +392,10 @@ unsigned char CoherentUnitOCL::SbcSuperposeReg8(
     bitLenInt inputStart, bitLenInt outputStart, bitLenInt carryIndex, unsigned char* values)
 {
     // The carry has to first to be measured for its input value.
-    bitCapInt carryIn = 0;
+    bitCapInt carryIn = 1;
     if (M(carryIndex)) {
         // If the carry is set, we carry 1 in. We always initially clear the carry after testing for carry in.
-        carryIn = 1;
+        carryIn = 0;
         X(carryIndex);
     }
 

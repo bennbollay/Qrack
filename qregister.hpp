@@ -23,6 +23,7 @@
 #include <stdexcept>
 #include <stdint.h>
 #include <thread>
+#include <vector>
 
 #include "complex16simd.hpp"
 
@@ -40,9 +41,11 @@ enum CoherentUnitEngine {
     COHERENT_UNIT_ENGINE_SOFTWARE_PARALLEL,
     COHERENT_UNIT_ENGINE_SOFTWARE = COHERENT_UNIT_ENGINE_SOFTWARE_PARALLEL,
 
-    COHERENT_UNIT_ENGINE_OPTIMIZED,
+    COHERENT_UNIT_ENGINE_SOFTWARE_SEPARATED,
 
     COHERENT_UNIT_ENGINE_OPENCL,
+
+    COHERENT_UNIT_ENGINE_OPENCL_SEPARATED,
 
     COHERENT_UNIT_ENGINE_MAX
 };
@@ -69,6 +72,8 @@ public:
      */
     CoherentUnit(bitLenInt qBitCount);
 
+    CoherentUnit(bitLenInt qBitCount, std::shared_ptr<std::default_random_engine> rgp);
+
     /**
      * Initialize a coherent unit with qBitCount number of bits, all to |0>
      * state, with a specific phase
@@ -77,6 +82,8 @@ public:
      * phase usually makes sense only if they are initialized at the same time.
      */
     CoherentUnit(bitLenInt qBitCount, Complex16 phaseFac);
+
+    CoherentUnit(bitLenInt qBitCount, Complex16 phaseFac, std::shared_ptr<std::default_random_engine> rgp);
 
     /**
      * Initialize a coherent unit with qBitCount number of bits, to initState
@@ -97,7 +104,7 @@ public:
      * Initialize a coherent unit with qBitCount number of bits, to initState unsigned integer permutation state, with
      * a shared random number generator.
      */
-    CoherentUnit(bitLenInt qBitCount, bitCapInt initState, std::default_random_engine* rgp);
+    CoherentUnit(bitLenInt qBitCount, bitCapInt initState, std::shared_ptr<std::default_random_engine> rgp);
 
     /**
      * Initialize a coherent unit with qBitCount number of bits, to initState unsigned integer permutation state, with
@@ -106,7 +113,8 @@ public:
      * \warning Overall phase is generally arbitrary and unknowable. Setting two CoherentUnit instances to the same
      * phase usually makes sense only if they are initialized at the same time.
      */
-    CoherentUnit(bitLenInt qBitCount, bitCapInt initState, Complex16 phaseFac, std::default_random_engine* rgp);
+    CoherentUnit(
+        bitLenInt qBitCount, bitCapInt initState, Complex16 phaseFac, std::shared_ptr<std::default_random_engine> rgp);
 
     /**
      * Initialize a cloned register with same exact quantum state as pqs
@@ -118,8 +126,11 @@ public:
     /** Destructor of CoherentUnit */
     virtual ~CoherentUnit() {}
 
-    /* Set the random seed (primarily used for testing) */
+    /** Set the random seed (primarily used for testing) */
     virtual void SetRandomSeed(uint32_t seed);
+
+    /** Set the concurrency level */
+    void SetConcurrencyLevel(uint32_t cores) { numCores = cores; }
 
     /** Get the count of bits in this register */
     int GetQubitCount() { return qubitCount; }
@@ -178,6 +189,8 @@ public:
      * exposing a quantum mechanically consistent API or instruction set.
      */
     virtual void Cohere(CoherentUnit& toCopy);
+
+    virtual void Cohere(std::vector<std::shared_ptr<CoherentUnit>> toCopy);
 
     /**
      * Minimally decohere a set of contiguous bits from the full coherent unit,
@@ -999,7 +1012,7 @@ protected:
     bitCapInt maxQPower;
     std::unique_ptr<Complex16[]> stateVec;
 
-    std::default_random_engine rand_generator_ptr[1];
+    std::shared_ptr<std::default_random_engine> rand_generator_ptr;
     std::uniform_real_distribution<double> rand_distribution;
 
     virtual void ResetStateVec(std::unique_ptr<Complex16[]> nStateVec);
@@ -1012,6 +1025,46 @@ protected:
     void NormalizeState();
     void Reverse(bitLenInt first, bitLenInt last);
     void UpdateRunningNorm();
+
+public:
+    /*
+     * Parallelization routines for spreading work across multiple cores.
+     */
+
+    /** Called once per value between begin and end. */
+    typedef std::function<void(const bitCapInt)> ParallelFunc;
+    typedef std::function<bitCapInt(const bitCapInt)> IncrementFunc;
+
+    /**
+     * Iterate through the permutations a maximum of end-begin times, allowing
+     * the caller to control the incrementation offset through 'inc'.
+     */
+    void par_for_inc(const bitCapInt begin, const bitCapInt end, IncrementFunc, ParallelFunc fn);
+
+    /** Call fn once for every numerical value between begin and end. */
+    void par_for(const bitCapInt begin, const bitCapInt end, ParallelFunc fn);
+
+    /**
+     * Skip over the skipPower bits.
+     *
+     * For example, if skipPower is 2, it will count:
+     *   0000, 0001, 0100, 0101, 1000, 1001, 1100, 1101.
+     *     ^     ^     ^     ^     ^     ^     ^     ^ - The second bit is
+     *                                                   untouched.
+     */
+    void par_for_skip(const bitCapInt begin, const bitCapInt end, const bitCapInt skipPower,
+        const bitLenInt skipBitCount, ParallelFunc fn);
+
+    /** Skip over the bits listed in maskArray in the same fashion as par_for_skip. */
+    void par_for_mask(
+        const bitCapInt, const bitCapInt, const bitCapInt* maskArray, const bitLenInt maskLen, ParallelFunc fn);
+
+    /** Calculate the normal for the array. */
+    double par_norm(const bitCapInt maxQPower, const Complex16* stateArray);
+
+protected:
+    int32_t numCores;
+
 }; // namespace Qrack
 
 template <class BidirectionalIterator>

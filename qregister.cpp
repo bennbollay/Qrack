@@ -15,11 +15,13 @@
 // See LICENSE.md in the project root or https://www.gnu.org/licenses/gpl-3.0.en.html
 // for details.
 
-#include "qregister.hpp"
+#include <atomic>
 #include <bitset>
+#include <future>
 #include <iostream>
+#include <thread>
 
-#include "par_for.hpp"
+#include "qregister.hpp"
 
 namespace Qrack {
 
@@ -83,7 +85,7 @@ CoherentUnit::CoherentUnit(bitLenInt qBitCount, bitCapInt initState)
 
 /** Initialize a coherent unit with qBitCount number of bits, to initState unsigned integer permutation state, with a
  * shared random number generator */
-CoherentUnit::CoherentUnit(bitLenInt qBitCount, bitCapInt initState, std::default_random_engine rgp[])
+CoherentUnit::CoherentUnit(bitLenInt qBitCount, bitCapInt initState, std::shared_ptr<std::default_random_engine> rgp)
     : CoherentUnit(qBitCount, initState, Complex16(-999.0, -999.0), rgp)
 {
 }
@@ -96,19 +98,20 @@ CoherentUnit::CoherentUnit(bitLenInt qBitCount, bitCapInt initState, std::defaul
  * phase usually makes sense only if they are initialized at the same time.
  */
 CoherentUnit::CoherentUnit(
-    bitLenInt qBitCount, bitCapInt initState, Complex16 phaseFac, std::default_random_engine rgp[])
+    bitLenInt qBitCount, bitCapInt initState, Complex16 phaseFac, std::shared_ptr<std::default_random_engine> rgp)
     : rand_distribution(0.0, 1.0)
+    , numCores(std::thread::hardware_concurrency())
 {
     if (qBitCount > (sizeof(bitCapInt) * bitsInByte))
         throw std::invalid_argument(
             "Cannot instantiate a register with greater capacity than native types on emulating system.");
 
     if (rgp == NULL) {
-        rand_generator_ptr[0] = { std::default_random_engine() };
+        rand_generator_ptr = std::make_shared<std::default_random_engine>();
         randomSeed = std::time(0);
         SetRandomSeed(randomSeed);
     } else {
-        rand_generator_ptr[0] = rgp[0];
+        rand_generator_ptr = rgp;
     }
 
     runningNorm = 1.0;
@@ -144,11 +147,29 @@ CoherentUnit::CoherentUnit(bitLenInt qBitCount)
 {
 }
 
+CoherentUnit::CoherentUnit(bitLenInt qBitCount, std::shared_ptr<std::default_random_engine> rgp)
+    : CoherentUnit(qBitCount, 0, Complex16(-999.0, -999.0), rgp)
+{
+}
+
+/** Initialize a coherent unit with qBitCount number of bits, all to |0> state. */
+CoherentUnit::CoherentUnit(bitLenInt qBitCount, Complex16 phaseFac)
+    : CoherentUnit(qBitCount, 0, phaseFac, NULL)
+{
+}
+
+/** Initialize a coherent unit with qBitCount number of bits, all to |0> state. */
+CoherentUnit::CoherentUnit(bitLenInt qBitCount, Complex16 phaseFac, std::shared_ptr<std::default_random_engine> rgp)
+    : CoherentUnit(qBitCount, 0, phaseFac, NULL)
+{
+}
+
 /// PSEUDO-QUANTUM Initialize a cloned register with same exact quantum state as pqs
 CoherentUnit::CoherentUnit(const CoherentUnit& pqs)
     : rand_distribution(0.0, 1.0)
+    , numCores(std::thread::hardware_concurrency())
 {
-    (*rand_generator_ptr) = std::default_random_engine();
+    rand_generator_ptr = pqs.rand_generator_ptr;
     randomSeed = std::time(0);
     SetRandomSeed(randomSeed);
 
@@ -216,12 +237,58 @@ void CoherentUnit::Cohere(CoherentUnit& toCopy)
     bitCapInt startMask = (1 << qubitCount) - 1;
     bitCapInt endMask = ((1 << (toCopy.qubitCount)) - 1) << qubitCount;
 
-    double angle = Rand() * 2.0 * M_PI;
-    Complex16 phaseFac(cos(angle), sin(angle));
     std::unique_ptr<Complex16[]> nStateVec(new Complex16[nMaxQPower]);
 
     par_for(0, nMaxQPower, [&](const bitCapInt lcv) {
         nStateVec[lcv] = stateVec[lcv & startMask] * toCopy.stateVec[(lcv & endMask) >> qubitCount];
+    });
+
+    qubitCount = nQubitCount;
+    maxQPower = nMaxQPower;
+
+    ResetStateVec(std::move(nStateVec));
+    UpdateRunningNorm();
+}
+
+/**
+ * Combine (copies) each CoherentUnit in the vector with this one, after the last bit
+ * index of this one. (If the programmer doesn't want to "cheat," it is left up
+ * to them to delete the old coherent unit that was added.
+ */
+void CoherentUnit::Cohere(std::vector<std::shared_ptr<CoherentUnit>> toCopy)
+{
+    bitLenInt i;
+    bitLenInt toCohereCount = toCopy.size();
+
+    std::vector<bitLenInt> offset(toCohereCount);
+    std::vector<bitCapInt> mask(toCohereCount);
+
+    bitCapInt startMask = (1 << qubitCount) - 1;
+    bitCapInt nQubitCount = qubitCount;
+    bitCapInt nMaxQPower;
+
+    if (runningNorm != 1.0) {
+        NormalizeState();
+    }
+
+    for (i = 0; i < toCohereCount; i++) {
+        if (toCopy[i]->runningNorm != 1.0) {
+            toCopy[i]->NormalizeState();
+        }
+        mask[i] = ((1 << toCopy[i]->GetQubitCount()) - 1) << nQubitCount;
+        offset[i] = nQubitCount;
+        nQubitCount += toCopy[i]->GetQubitCount();
+    }
+
+    nMaxQPower = 1 << nQubitCount;
+
+    std::unique_ptr<Complex16[]> nStateVec(new Complex16[nMaxQPower]);
+
+    par_for(0, nMaxQPower, [&](const bitCapInt lcv) {
+        nStateVec[lcv] = stateVec[lcv & startMask];
+        for (bitLenInt j = 0; j < toCohereCount; j++) {
+            nStateVec[lcv] *= toCopy[j]->stateVec[(lcv & mask[j]) >> offset[j]];
+        }
     });
 
     qubitCount = nQubitCount;
@@ -1790,6 +1857,7 @@ void CoherentUnit::DECSC(
     bool hasCarry = M(carryIndex);
     if (hasCarry) {
         X(carryIndex);
+    } else {
         toSub++;
     }
     bitCapInt overflowMask = 1 << overflowIndex;
@@ -1811,9 +1879,9 @@ void CoherentUnit::DECSC(
         bitCapInt outInt = (inOutInt - toSub) + (lengthPower);
         bitCapInt outRes;
         if (outInt < (lengthPower)) {
-            outRes = (outInt << (inOutStart)) | otherRes | (carryMask);
+            outRes = (outInt << (inOutStart)) | otherRes;
         } else {
-            outRes = ((outInt - (lengthPower)) << (inOutStart)) | otherRes;
+            outRes = ((outInt - (lengthPower)) << (inOutStart)) | otherRes | carryMask;
         }
         bool isOverflow = false;
         // First negative:
@@ -2172,4 +2240,134 @@ void CoherentUnit::Reverse(bitLenInt first, bitLenInt last)
 }
 
 void CoherentUnit::UpdateRunningNorm() { runningNorm = par_norm(maxQPower, &(stateVec[0])); }
+
+/*
+ * Iterate through the permutations a maximum of end-begin times, allowing the
+ * caller to control the incrementation offset through 'inc'.
+ */
+void CoherentUnit::par_for_inc(const bitCapInt begin, const bitCapInt end, IncrementFunc inc, ParallelFunc fn)
+{
+    std::atomic<bitCapInt> idx;
+    idx = begin;
+
+    std::vector<std::future<void>> futures(numCores);
+
+    for (int cpu = 0; cpu < numCores; cpu++) {
+        futures[cpu] = std::async(std::launch::async, [&]() {
+            for (bitCapInt i = idx++; i < end; i = idx++) {
+                i = inc(i);
+                /* Easiest to clamp on end. */
+                if (i >= end) {
+                    break;
+                }
+                fn(i);
+            }
+        });
+    }
+
+    for (int cpu = 0; cpu < numCores; cpu++) {
+        futures[cpu].get();
+    }
+}
+
+void CoherentUnit::par_for(const bitCapInt begin, const bitCapInt end, ParallelFunc fn)
+{
+    par_for_inc(begin, end, [](const bitCapInt i) { return i; }, fn);
+}
+
+void CoherentUnit::par_for_skip(
+    const bitCapInt begin, const bitCapInt end, const bitCapInt skipMask, const bitLenInt maskWidth, ParallelFunc fn)
+{
+    /*
+     * Add maskWidth bits by shifting the incrementor up that number of
+     * bits, filling with 0's.
+     *
+     * For example, if the skipMask is 0x8, then the lowMask will be 0x7
+     * and the high mask will be ~(0x7 + 0x8) ==> ~0xf, shifted by the
+     * number of extra bits to add.
+     */
+    bitCapInt lowMask = skipMask - 1;
+    bitCapInt highMask = (~(lowMask + skipMask)) << (maskWidth - 1);
+
+    IncrementFunc incFn = [lowMask, highMask, maskWidth](
+                              bitCapInt i) { return ((i << maskWidth) & highMask) | (i & lowMask); };
+
+    par_for_inc(begin, end, incFn, fn);
+}
+
+void CoherentUnit::par_for_mask(
+    const bitCapInt begin, const bitCapInt end, const bitCapInt* maskArray, const bitLenInt maskLen, ParallelFunc fn)
+{
+    if (maskLen > qubitCount) {
+        throw std::invalid_argument("Too many masks");
+    }
+
+    for (int i = 1; i < maskLen; i++) {
+        if (maskArray[i] < maskArray[i - 1]) {
+            throw std::invalid_argument("Masks must be ordered by size");
+        }
+    }
+
+    /* Pre-calculate the masks to simplify the increment function later. */
+    bitCapInt masks[maskLen][2];
+
+    for (int i = 0; i < maskLen; i++) {
+        masks[i][0] = maskArray[i] - 1; // low mask
+        masks[i][1] = (~(masks[i][0] + maskArray[i])); // high mask
+    }
+
+    IncrementFunc incFn = [&masks, maskLen](bitCapInt i) {
+        /* Push i apart, one mask at a time. */
+        for (int m = 0; m < maskLen; m++) {
+            i = ((i << 1) & masks[m][1]) | (i & masks[m][0]);
+        }
+        return i;
+    };
+
+    par_for_inc(begin, end, incFn, fn);
+}
+
+double CoherentUnit::par_norm(const bitCapInt maxQPower, const Complex16* stateArray)
+{
+    // const double* sAD = reinterpret_cast<const double*>(stateArray);
+    // double* sSAD = new double[maxQPower * 2];
+    // std::partial_sort_copy(sAD, sAD + (maxQPower * 2), sSAD, sSAD + (maxQPower * 2));
+    // Complex16* sorted = reinterpret_cast<Complex16*>(sSAD);
+
+    std::atomic<bitCapInt> idx;
+    idx = 0;
+    double* nrmPart = new double[numCores];
+    std::vector<std::future<void>> futures(numCores);
+    for (int cpu = 0; cpu != numCores; ++cpu) {
+        futures[cpu] = std::async(std::launch::async, [cpu, &idx, maxQPower, stateArray, nrmPart]() {
+            double sqrNorm = 0.0;
+            // double smallSqrNorm = 0.0;
+            bitCapInt i;
+            for (;;) {
+                i = idx++;
+                // if (i >= maxQPower) {
+                //	sqrNorm += smallSqrNorm;
+                //	break;
+                //}
+                // smallSqrNorm += norm(sorted[i]);
+                // if (smallSqrNorm > sqrNorm) {
+                //	sqrNorm += smallSqrNorm;
+                //	smallSqrNorm = 0;
+                //}
+                if (i >= maxQPower)
+                    break;
+                sqrNorm += norm(stateArray[i]);
+            }
+            nrmPart[cpu] = sqrNorm;
+        });
+    }
+
+    double nrmSqr = 0;
+    for (int cpu = 0; cpu != numCores; ++cpu) {
+        futures[cpu].get();
+        nrmSqr += nrmPart[cpu];
+    }
+    return sqrt(nrmSqr);
+}
+
 } // namespace Qrack

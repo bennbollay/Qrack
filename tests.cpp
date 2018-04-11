@@ -3,27 +3,120 @@
 #include <stdlib.h>
 
 #include "catch.hpp"
-#include "par_for.hpp"
 #include "qregister.hpp"
 
 #include "tests.hpp"
 
 using namespace Qrack;
 
-/* Begin Test Cases. */
-TEST_CASE("test_par_for")
+TEST_CASE_METHOD(CoherentUnitTestFixture, "test_par_for")
 {
-    size_t NUM_ENTRIES = 2000;
+    int NUM_ENTRIES = 2000;
     std::atomic_bool hit[NUM_ENTRIES];
+    std::atomic_int calls;
 
-    for (int i = 0; i < 2000; i++) {
+    calls.store(0);
+
+    for (int i = 0; i < NUM_ENTRIES; i++) {
         hit[i].store(false);
     }
 
-    par_for(0, NUM_ENTRIES, [&hit](const bitCapInt lcv) {
+    qftReg->par_for(0, NUM_ENTRIES, [&](const bitCapInt lcv) {
         bool old = true;
         old = hit[lcv].exchange(old);
         REQUIRE(old == false);
+        calls++;
+    });
+
+    REQUIRE(calls.load() == NUM_ENTRIES);
+
+    for (int i = 0; i < NUM_ENTRIES; i++) {
+        REQUIRE(hit[i].load() == true);
+    }
+}
+
+TEST_CASE_METHOD(CoherentUnitTestFixture, "test_par_for_skip")
+{
+    int NUM_ENTRIES = 2000;
+    int NUM_CALLS = 1000;
+
+    std::atomic_bool hit[NUM_ENTRIES];
+    std::atomic_int calls;
+
+    calls.store(0);
+
+    int skipBit = 0x4; // Skip 0b100 when counting upwards.
+
+    for (int i = 0; i < NUM_ENTRIES; i++) {
+        hit[i].store(false);
+    }
+
+    qftReg->par_for_skip(0, NUM_ENTRIES, 4, 1, [&](const bitCapInt lcv) {
+        bool old = true;
+        old = hit[lcv].exchange(old);
+        REQUIRE(old == false);
+        REQUIRE((lcv & skipBit) == 0);
+
+        calls++;
+    });
+
+    REQUIRE(calls.load() == NUM_CALLS);
+}
+
+TEST_CASE_METHOD(CoherentUnitTestFixture, "test_par_for_skip_wide")
+{
+    int NUM_ENTRIES = 2000;
+    int NUM_CALLS = 1000;
+
+    std::atomic_bool hit[NUM_ENTRIES];
+    std::atomic_int calls;
+
+    calls.store(0);
+
+    int skipBit = 0x4; // Skip 0b100 when counting upwards.
+
+    for (int i = 0; i < NUM_ENTRIES; i++) {
+        hit[i].store(false);
+    }
+
+    qftReg->par_for_skip(0, NUM_ENTRIES, 4, 3, [&](const bitCapInt lcv) {
+        REQUIRE(lcv < NUM_ENTRIES);
+        bool old = true;
+        old = hit[lcv].exchange(old);
+        REQUIRE(old == false);
+        REQUIRE((lcv & skipBit) == 0);
+
+        calls++;
+    });
+}
+
+TEST_CASE_METHOD(CoherentUnitTestFixture, "test_par_for_mask")
+{
+    int NUM_ENTRIES = 2000;
+    int NUM_CALLS = 512; // 2048 >> 2, masked off so all bits are set.
+
+    std::atomic_bool hit[NUM_ENTRIES];
+    std::atomic_int calls;
+
+    bitCapInt skipArray[] = { 0x4, 0x100 }; // Skip bits 0b100000100
+    int NUM_SKIP = sizeof(skipArray) / sizeof(skipArray[0]);
+
+    calls.store(0);
+
+    for (int i = 0; i < NUM_ENTRIES; i++) {
+        hit[i].store(false);
+    }
+
+    qftReg->SetConcurrencyLevel(1);
+
+    qftReg->par_for_mask(0, NUM_ENTRIES, skipArray, 2, [&](const bitCapInt lcv) {
+        bool old = true;
+        old = hit[lcv].exchange(old);
+        REQUIRE(old == false);
+        for (int i = 0; i < NUM_SKIP; i++) {
+            REQUIRE((lcv & skipArray[i]) == 0);
+        }
+        calls++;
     });
 }
 
@@ -69,8 +162,8 @@ TEST_CASE_METHOD(CoherentUnitTestFixture, "test_sbc_superposition_reg")
 {
     int j;
 
-    qftReg->SetPermutation(0);
-    REQUIRE_THAT(qftReg, HasProbability(0, 16, 0));
+    qftReg->SetPermutation(1 << 16);
+    REQUIRE_THAT(qftReg, HasProbability(0, 16, 1 << 16));
 
     qftReg->H(8, 8);
     unsigned char testPage[256];
@@ -80,7 +173,7 @@ TEST_CASE_METHOD(CoherentUnitTestFixture, "test_sbc_superposition_reg")
     qftReg->SuperposeReg8(8, 0, testPage);
 
     unsigned char expectation = qftReg->SbcSuperposeReg8(8, 0, 16, testPage);
-    REQUIRE_THAT(qftReg, HasProbability(0, 8, 0x00));
+    REQUIRE_THAT(qftReg, HasProbability(0, 8, 1 << 16));
     REQUIRE(expectation == 0x00);
 }
 
@@ -139,15 +232,15 @@ TEST_CASE_METHOD(CoherentUnitTestFixture, "test_decc")
 {
     int i;
 
-    qftReg->SetPermutation(7 + 256);
+    qftReg->SetPermutation(7);
     for (i = 0; i < 10; i++) {
         qftReg->DECC(1, 0, 8, 8);
         if (i < 6) {
-            REQUIRE_THAT(*qftReg, HasProbability(0, 9, 5 - i));
+            REQUIRE_THAT(*qftReg, HasProbability(0, 9, 5 - i + 256));
         } else if (i == 6) {
-            REQUIRE_THAT(*qftReg, HasProbability(0, 9, 0x1ff));
+            REQUIRE_THAT(*qftReg, HasProbability(0, 9, 0xff));
         } else {
-            REQUIRE_THAT(*qftReg, HasProbability(0, 9, 253 - i + 7));
+            REQUIRE_THAT(*qftReg, HasProbability(0, 9, 253 - i + 7 + 256));
         }
     }
 }
@@ -354,5 +447,3 @@ TEST_CASE_METHOD(CoherentUnitTestFixture, "test_basis_change")
 
     REQUIRE_THAT(qftReg, HasProbability(0, 16, 100));
 }
-
-//("Hello, Universe!")
