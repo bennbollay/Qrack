@@ -351,25 +351,25 @@ TEST_CASE_METHOD(QInterfaceTestFixture, "test_qft_h")
 
     int i, j;
 
-    std::cout << "Quantum Fourier transform of 85 (1+4+16+64), with 1 bits first passed through Hadamard gates:"
-              << std::endl;
+    // std::cout << "Quantum Fourier transform of 85 (1+4+16+64), with 1 bits first passed through Hadamard gates:"
+    //           << std::endl;
 
     for (i = 0; i < 8; i += 2) {
         qftReg->H(i);
     }
 
-    std::cout << "Initial:" << std::endl;
-    for (i = 0; i < 8; i++) {
-        std::cout << "Bit " << i << ", Chance of 1:" << qftReg->Prob(i) << std::endl;
-    }
+    // std::cout << "Initial:" << std::endl;
+    // for (i = 0; i < 8; i++) {
+    //     std::cout << "Bit " << i << ", Chance of 1:" << qftReg->Prob(i) << std::endl;
+    // }
 
     qftReg->QFT(0, 8);
 
-    std::cout << "Final:" << std::endl;
-    for (i = 0; i < 8; i++) {
-        qftProbs[i] = qftReg->Prob(i);
-        std::cout << "Bit " << i << ", Chance of 1:" << qftProbs[i] << std::endl;
-    }
+    // std::cout << "Final:" << std::endl;
+    // for (i = 0; i < 8; i++) {
+    //     qftProbs[i] = qftReg->Prob(i);
+    //     std::cout << "Bit " << i << ", Chance of 1:" << qftProbs[i] << std::endl;
+    // }
 }
 
 TEST_CASE_METHOD(QInterfaceTestFixture, "test_decohere")
@@ -421,7 +421,7 @@ TEST_CASE_METHOD(QInterfaceTestFixture, "test_grover")
     qftReg->SetPermutation(0);
     qftReg->H(0, 8);
 
-    std::cout << "Iterations:" << std::endl;
+    // std::cout << "Iterations:" << std::endl;
     // Twelve iterations maximizes the probablity for 256 searched elements.
     for (i = 0; i < 12; i++) {
         // Our "oracle" is true for an input of "100" and false for all other inputs.
@@ -433,12 +433,12 @@ TEST_CASE_METHOD(QInterfaceTestFixture, "test_grover")
         qftReg->ZeroPhaseFlip(0, 8);
         qftReg->H(0, 8);
         qftReg->PhaseFlip();
-        std::cout << "\t" << std::setw(2) << i << "> chance of match:" << qftReg->ProbAll(TARGET_PROB) << std::endl;
+        // std::cout << "\t" << std::setw(2) << i << "> chance of match:" << qftReg->ProbAll(TARGET_PROB) << std::endl;
     }
 
-    std::cout << "Ind Result:     " << std::showbase << qftReg << std::endl;
-    std::cout << "Full Result:    " << qftReg << std::endl;
-    std::cout << "Per Bit Result: " << std::showpoint << qftReg << std::endl;
+    // std::cout << "Ind Result:     " << std::showbase << qftReg << std::endl;
+    // std::cout << "Full Result:    " << qftReg << std::endl;
+    // std::cout << "Per Bit Result: " << std::showpoint << qftReg << std::endl;
 
     qftReg->MReg(0, 8);
 
@@ -465,7 +465,7 @@ TEST_CASE_METHOD(QInterfaceTestFixture, "test_grover_lookup")
     qftReg->H(8, 8);
     qftReg->SuperposeReg8(8, 0, toLoad);
 
-    std::cout << "Iterations:" << std::endl;
+    // std::cout << "Iterations:" << std::endl;
     // Twelve iterations maximizes the probablity for 256 searched elements.
     for (i = 0; i < 12; i++) {
         // Our "oracle" is true for an input of "100" and false for all other inputs.
@@ -481,12 +481,12 @@ TEST_CASE_METHOD(QInterfaceTestFixture, "test_grover_lookup")
         qftReg->H(8, 8);
         qftReg->PhaseFlip();
         qftReg->AdcSuperposeReg8(8, 0, 16, toLoad);
-        std::cout << "\t" << std::setw(2) << i << "> chance of match:" << qftReg->ProbAll(TARGET_PROB) << std::endl;
+        // std::cout << "\t" << std::setw(2) << i << "> chance of match:" << qftReg->ProbAll(TARGET_PROB) << std::endl;
     }
 
-    std::cout << "Ind Result:     " << std::showbase << qftReg << std::endl;
-    std::cout << "Full Result:    " << qftReg << std::endl;
-    std::cout << "Per Bit Result: " << std::showpoint << qftReg << std::endl;
+    // std::cout << "Ind Result:     " << std::showbase << qftReg << std::endl;
+    // std::cout << "Full Result:    " << qftReg << std::endl;
+    // std::cout << "Per Bit Result: " << std::showpoint << qftReg << std::endl;
 
     qftReg->MReg(0, 8);
 
@@ -527,17 +527,14 @@ TEST_CASE_METHOD(QInterfaceTestFixture, "test_entanglement")
     for (int i = 0; i < qftReg->GetQubitCount(); i += 2) {
         qftReg->X(i);
     }
-    printf("X\n"); unit->DumpShards();
     REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x55555));
     for (int i = 0; i < (qftReg->GetQubitCount() - 1); i += 2) {
         qftReg->CNOT(i, i + 1);
     }
-    printf("CNOT 1\n"); unit->DumpShards();
     REQUIRE_THAT(qftReg, HasProbability(0, 20, 0xfffff));
     for (int i = qftReg->GetQubitCount() - 2; i > 0; i -= 2) {
         qftReg->CNOT(i - 1, i);
     }
-    printf("CNOT 2\n"); unit->DumpShards();
     REQUIRE_THAT(qftReg, HasProbability(0, 20, 0xAAAAB));
 
     for (int i = 1; i < qftReg->GetQubitCount(); i += 2) {
@@ -554,7 +551,6 @@ TEST_CASE_METHOD(QInterfaceTestFixture, "test_entanglement_2")
     for (int i = 0; i < qftReg->GetQubitCount(); i += 2) {
         qftReg->X(i);
     }
-    printf("X\n"); unit->DumpShards();
     REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x55555));
 
     /* Tweak a handful of bits throughtout the object. */
@@ -565,10 +561,38 @@ TEST_CASE_METHOD(QInterfaceTestFixture, "test_entanglement_2")
 
     REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x5D174));
     unit->EntangleRange(8, 8, 0, 8);
-    printf("ENT\n"); unit->DumpShards();
     REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x5D174));
 
     unit->ROL(0, 0, 1); /* Use ROL to force an OrderContiguous */
-    printf("ROL\n"); unit->DumpShards();
+    REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x5D174));
+}
+
+TEST_CASE_METHOD(QInterfaceTestFixture, "test_entanglement_3")
+{
+    Qrack::QUnitPtr unit = std::dynamic_pointer_cast<Qrack::QUnit>(qftReg);
+    if (!unit) { return; }
+
+    REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x0));
+    for (int i = 0; i < qftReg->GetQubitCount(); i += 2) {
+        qftReg->X(i);
+    }
+    REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x55555));
+
+    /* Tweak a handful of bits throughtout the object. */
+    qftReg->X(0);
+    qftReg->X(5);
+    qftReg->X(10);
+    qftReg->X(15);
+
+    REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x5D174));
+
+    /* Test the entanglement with different patterns. */
+    unit->EntangleRange(0, 3);
+    qftReg->CNOT(0, 8);
+    unit->EntangleRange(5, 4);
+    unit->EntangleRange(0, 10);
+    REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x5D174));
+
+    unit->ROL(0, 0, 1); /* Use ROL to force an OrderContiguous */
     REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x5D174));
 }
