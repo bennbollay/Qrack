@@ -14,7 +14,10 @@
 
 #include <random>
 
+class QInterfaceTestFixture;
+
 #include "qinterface.hpp"
+
 
 namespace Qrack {
 
@@ -24,6 +27,9 @@ struct QEngineShard {
     bitLenInt mapped;
 };
 
+class QUnit;
+typedef std::shared_ptr<QUnit> QUnitPtr;
+
 class QUnit : public QInterface
 {
 protected:
@@ -31,6 +37,12 @@ protected:
     std::vector<QEngineShard> shards;
 
     std::shared_ptr<std::default_random_engine> rand_generator;
+
+    virtual void SetQubitCount(bitLenInt qb)
+    {
+        shards.resize(qb);
+        QInterface::SetQubitCount(qb);
+    }
 
 public:
     QUnit(QInterfaceEngine eng, bitLenInt qBitCount, bitCapInt initState = 0, std::shared_ptr<std::default_random_engine> rgp = nullptr);
@@ -158,6 +170,7 @@ public:
      * @{
      */
 
+    virtual void CopyState(QInterfacePtr orig);
     virtual double Prob(bitLenInt qubit);
     virtual double ProbAll(bitCapInt fullRegister);
     virtual void ProbArray(double* probArray);
@@ -166,6 +179,7 @@ public:
     /** @} */
 
 protected:
+public:     /* XXX XXX */
     typedef void (QInterface::*INCxFn)(bitCapInt, bitLenInt, bitLenInt, bitLenInt);
     typedef void (QInterface::*INCxxFn)(bitCapInt, bitLenInt, bitLenInt, bitLenInt, bitLenInt);
     void INCx(INCxFn fn, bitCapInt toMod, bitLenInt start, bitLenInt length, bitLenInt flagIndex);
@@ -186,6 +200,8 @@ protected:
 
     void OrderContiguous(QInterfacePtr unit);
 
+    void Detach(bitLenInt start, bitLenInt length, QInterfacePtr dest);
+
     struct QSortEntry
     {
         bitLenInt bit;
@@ -198,6 +214,10 @@ protected:
         }
     };
     void SortUnit(QInterfacePtr unit, std::vector<QSortEntry> &bits, bitLenInt low, bitLenInt high);
+
+    /* Debugging and diagnostic routines. */
+    friend class QInterfaceTestFixture; /* XXX XXX */
+    void DumpShards();
 };
 
 } // namespace Qrack

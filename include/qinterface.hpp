@@ -61,7 +61,7 @@ protected:
     bitLenInt qubitCount;
     bitCapInt maxQPower;
 
-    void SetQubitCount(bitLenInt qb)
+    virtual void SetQubitCount(bitLenInt qb)
     {
         qubitCount = qb;
         maxQPower = 1 << qubitCount;
@@ -952,6 +952,13 @@ public:
      *
      * @{
      */
+
+    /**
+     * Direct copy of raw state vector to produce a clone
+     *
+     * \warning PSEUDO-QUANTUM
+     */
+    virtual void CopyState(QInterfacePtr orig) = 0;
 
     /**
      * Direct measure of bit probability to be in |1> state

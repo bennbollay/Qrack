@@ -18,6 +18,7 @@
 #include "catch.hpp"
 #include "qinterface.hpp"
 #include "qengine_cpu.hpp"
+#include "qunit.hpp"
 
 #include "tests.hpp"
 
@@ -145,10 +146,8 @@ TEST_CASE("test_par_for_mask")
 TEST_CASE_METHOD(QInterfaceTestFixture, "test_superposition_reg")
 {
     int j;
-
     qftReg->SetReg(0, 8, 0x03);
     REQUIRE_THAT(qftReg, HasProbability(0, 16, 0x03));
-
     unsigned char testPage[256];
     for (j = 0; j < 256; j++) {
         testPage[j] = j;
@@ -157,22 +156,17 @@ TEST_CASE_METHOD(QInterfaceTestFixture, "test_superposition_reg")
     unsigned char expectation = qftReg->SuperposeReg8(0, 8, testPage);
     REQUIRE_THAT(qftReg, HasProbability(0, 16, 0x303));
 }
-
 TEST_CASE_METHOD(QInterfaceTestFixture, "test_adc_superposition_reg")
 {
     int j;
-
     qftReg->SetPermutation(0);
     REQUIRE_THAT(qftReg, HasProbability(0, 16, 0));
-
     qftReg->H(8, 8);
     unsigned char testPage[256];
     for (j = 0; j < 256; j++) {
         testPage[j] = j;
     }
-
     qftReg->SuperposeReg8(8, 0, testPage);
-
     for (j = 0; j < 256; j++) {
         testPage[j] = 255 - j;
     }
@@ -180,21 +174,17 @@ TEST_CASE_METHOD(QInterfaceTestFixture, "test_adc_superposition_reg")
     REQUIRE_THAT(qftReg, HasProbability(0, 8, 0xff));
     REQUIRE(expectation == 0xff);
 }
-
 TEST_CASE_METHOD(QInterfaceTestFixture, "test_sbc_superposition_reg")
 {
     int j;
-
     qftReg->SetPermutation(1 << 16);
     REQUIRE_THAT(qftReg, HasProbability(0, 16, 1 << 16));
-
     qftReg->H(8, 8);
     unsigned char testPage[256];
     for (j = 0; j < 256; j++) {
         testPage[j] = j;
     }
     qftReg->SuperposeReg8(8, 0, testPage);
-
     unsigned char expectation = qftReg->SbcSuperposeReg8(8, 0, 16, testPage);
     REQUIRE_THAT(qftReg, HasProbability(0, 8, 1 << 16));
     REQUIRE(expectation == 0x00);
@@ -472,14 +462,14 @@ TEST_CASE_METHOD(QInterfaceTestFixture, "test_grover_lookup")
         qftReg->ZeroPhaseFlip(0, 8);
         qftReg->INC(100, 0, 8);
         // This ends the "oracle."
-        qftReg->X(16);
-        qftReg->SbcSuperposeReg8(8, 0, 16, toLoad);
-        qftReg->X(16);
+        qftReg->X(17);
+        qftReg->SbcSuperposeReg8(8, 0, 17, toLoad);
+        qftReg->X(17);
         qftReg->H(8, 8);
         qftReg->ZeroPhaseFlip(8, 8);
         qftReg->H(8, 8);
         qftReg->PhaseFlip();
-        qftReg->AdcSuperposeReg8(8, 0, 16, toLoad);
+        qftReg->AdcSuperposeReg8(8, 0, 17, toLoad);
         std::cout << "\t" << std::setw(2) << i << "> chance of match:" << qftReg->ProbAll(TARGET_PROB) << std::endl;
     }
 
@@ -517,4 +507,102 @@ TEST_CASE_METHOD(QInterfaceTestFixture, "test_basis_change")
     qftReg->H(8, 8);
 
     REQUIRE_THAT(qftReg, HasProbability(0, 16, 100));
+}
+
+TEST_CASE_METHOD(QInterfaceTestFixture, "test_entanglement")
+{
+    QUnitPtr unit = std::dynamic_pointer_cast<QUnit>(qftReg);
+    REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x0));
+    for (int i = 0; i < qftReg->GetQubitCount(); i += 2) {
+        qftReg->X(i);
+    }
+    printf("X\n"); unit->DumpShards();
+    REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x55555));
+    for (int i = 0; i < (qftReg->GetQubitCount() - 1); i += 2) {
+        qftReg->CNOT(i, i + 1);
+    }
+    printf("CNOT 1\n"); unit->DumpShards();
+    REQUIRE_THAT(qftReg, HasProbability(0, 20, 0xfffff));
+    for (int i = qftReg->GetQubitCount() - 2; i > 0; i -= 2) {
+        qftReg->CNOT(i - 1, i);
+    }
+    printf("CNOT 2\n"); unit->DumpShards();
+    REQUIRE_THAT(qftReg, HasProbability(0, 20, 0xAAAAB));
+
+    for (int i = 1; i < qftReg->GetQubitCount(); i += 2) {
+        qftReg->X(i);
+    }
+    REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x1));
+}
+
+TEST_CASE_METHOD(QInterfaceTestFixture, "test_entanglement_2")
+{
+    Qrack::QUnitPtr unit = std::dynamic_pointer_cast<Qrack::QUnit>(qftReg);
+
+    REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x0));
+    for (int i = 0; i < qftReg->GetQubitCount(); i += 2) {
+        qftReg->X(i);
+    }
+    printf("X\n"); unit->DumpShards();
+    REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x55555));
+
+    /* Tweak a handful of bits throughtout the object. */
+    qftReg->X(0);
+    qftReg->X(5);
+    qftReg->X(10);
+    qftReg->X(15);
+
+    REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x5D174));
+    unit->EntangleRange(8, 8, 0, 8);
+    printf("ENT\n"); unit->DumpShards();
+    REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x5D174));
+
+    unit->ROL(0, 0, 1); /* Use ROL to force an OrderContiguous */
+    printf("ROL\n"); unit->DumpShards();
+    REQUIRE_THAT(qftReg, HasProbability(0, 20, 0x5D174));
+}
+
+TEST_CASE("test_coherence_swap")
+{
+    std::shared_ptr<std::default_random_engine> rng = std::make_shared<std::default_random_engine>();
+    rng->seed(10);
+
+    QEngineCPUPtr a_1 = std::make_shared<QEngineCPU>(8, 0, rng);
+    QInterfacePtr a_2 = std::make_shared<QEngineCPU>(8, 0, rng);
+    QEngineCPUPtr b_1 = std::make_shared<QEngineCPU>(8, 0, rng);
+    QInterfacePtr b_2 = std::make_shared<QEngineCPU>(8, 0, rng);
+
+    a_2->H(0, 8);
+    b_2->H(0, 8);
+
+    a_1->Cohere(a_2);
+    b_2->Cohere(b_1);
+
+    /* B is backwards, A is ordered correctly. */
+    for (int i = 0; i < 8; i++) {
+        b_2->Swap(i, i + 8);
+    }
+    for (int i = 0; i < 16; i++) {
+        REQUIRE(a_1->Prob(i) == b_2->Prob(i));
+    }
+}
+
+TEST_CASE_METHOD(QInterfaceTestFixture, "test_basis_change_3")
+{   
+    unsigned char toSearch[256];
+    
+    // Create the lookup table
+    for (int i = 0; i < 256; i++) {
+        toSearch[i] = 100;
+    }
+    
+    // Divide qftReg into two registers of 8 bits each
+    
+    qftReg->SetPermutation(0);
+    qftReg->H(9, 8);
+    qftReg->SuperposeReg8(9, 0, toSearch);
+    qftReg->H(9, 8);
+
+
+    REQUIRE_THAT(qftReg, HasProbability(0, 17, 100));
 }

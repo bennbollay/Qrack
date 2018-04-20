@@ -38,6 +38,22 @@ QUnit::QUnit(QInterfaceEngine eng, bitLenInt qBitCount, bitCapInt initState, std
     }
 }
 
+void QUnit::CopyState(QInterfacePtr orig)
+{
+    QInterfacePtr unit = CreateQuantumInterface(engine, engine, 1, 0, rand_generator);
+    unit->CopyState(orig);
+
+    shards.clear();
+    SetQubitCount(orig->GetQubitCount());
+
+    /* Set up the shards to refer to the new unit. */
+    bitLenInt i = 0;
+    for (auto shard : shards) {
+        shard.unit = unit;
+        shard.mapped = i++;
+    }
+}
+
 void QUnit::SetQuantumState(Complex16* inputState)
 {
     auto unit = CreateQuantumInterface(engine, engine, qubitCount, 0, rand_generator);
@@ -55,17 +71,27 @@ void QUnit::SetQuantumState(Complex16* inputState)
  */
 bitLenInt QUnit::Cohere(QInterfacePtr toCopy)
 {
-    bitLenInt ret = qubitCount;
+    bitLenInt oldCount = qubitCount;
 
-    shards.resize(qubitCount + toCopy->GetQubitCount());
-    for (bitLenInt i = 0; i < toCopy->GetQubitCount(); i++) {
-        shards[i + qubitCount].unit = toCopy;
-        shards[i + qubitCount].mapped = i;
+    /* Increase the number of bits in this object. */
+    SetQubitCount(qubitCount + toCopy->GetQubitCount());
+
+    /* Create a clone of the quantum state in toCopy. */
+    QInterfacePtr clone = CreateQuantumInterface(engine, engine, 1, 0,
+            rand_generator);
+    clone->CopyState(toCopy);
+
+    /* Destroy the quantum state in toCopy. */
+    Complex16 emptyState[] = {Complex16(0, 0), Complex16(0, 0)};
+    toCopy->SetQuantumState(emptyState);
+
+    /* Update shards to reference the cloned state. */
+    for (bitLenInt i = 0; i < clone->GetQubitCount(); i++) {
+        shards[i + oldCount].unit = clone;
+        shards[i + oldCount].mapped = i;
     }
 
-    qubitCount = qubitCount + toCopy->GetQubitCount();
-
-    return ret;
+    return oldCount;
 }
 
 std::map<QInterfacePtr, bitLenInt> QUnit::Cohere(std::vector<QInterfacePtr> toCopy)
@@ -79,30 +105,48 @@ std::map<QInterfacePtr, bitLenInt> QUnit::Cohere(std::vector<QInterfacePtr> toCo
     return ret;
 }
 
-/*
- * Normal QInterface::Decohere would remove the bits entirely and reduce the
- * qBitCount, but this resets them to 0.
- */
-void QUnit::Decohere(bitLenInt start, bitLenInt length, QInterfacePtr dest)
+void QUnit::Detach(bitLenInt start, bitLenInt length, QInterfacePtr dest)
 {
-    EntangleRange(start, length);
-    QInterfacePtr unit = shards[start].unit;
+    /* TODO: This method should compose the bits for the destination without cohering the length first */
 
-    for (auto &&shard : shards) {
-        if (shard.unit == unit) {
-            shard.unit = CreateQuantumInterface(engine, engine, 1, 0, rand_generator);
-            shard.mapped = 0;
+    EntangleRange(start, length);
+    OrderContiguous(shards[start].unit);
+
+    QInterfacePtr unit = shards[start].unit;
+    bitLenInt mapped = shards[start].mapped;
+
+    if (dest && unit->GetQubitCount() > length) {
+        unit->Decohere(mapped, length, dest);
+    } else if (dest) {
+        dest->CopyState(unit);
+    } else {
+        unit->Dispose(mapped, length);
+    }
+
+    shards.erase(shards.begin() + start, shards.begin() + start + length);
+
+    if (unit->GetQubitCount() == length) {
+        return;
+    }
+
+    /* Find the rest of the qubits. */
+    for (auto shard : shards) {
+        if (shard.unit == unit && shard.mapped > (mapped + length)) {
+            shard.mapped -= length;
         }
     }
 
-    dest->Cohere(unit);
+    SetQubitCount(qubitCount - length);
+}
+
+void QUnit::Decohere(bitLenInt start, bitLenInt length, QInterfacePtr dest)
+{
+    Detach(start, length, dest);
 }
 
 void QUnit::Dispose(bitLenInt start, bitLenInt length)
 {
-    for (bitLenInt i = 0; i < length; i++) {
-        Decompose(start + i);
-    }
+    Detach(start, length, nullptr);
 }
 
 void QUnit::Decompose(bitLenInt qubit)
@@ -117,15 +161,11 @@ void QUnit::Decompose(bitLenInt qubit)
     }
 }
 
-QInterfacePtr QUnit::Entangle(std::initializer_list<bitLenInt *> bits)
-{
-    return EntangleIterator(bits.begin(), bits.end());
-}
-
 template <class It>
 QInterfacePtr QUnit::EntangleIterator(It first, It last)
 {
     std::vector<QInterfacePtr> units;
+    units.reserve((int)(last - first));
 
     QInterfacePtr unit1 = shards[**first].unit;
     std::map<QInterfacePtr, bool> found;
@@ -133,21 +173,24 @@ QInterfacePtr QUnit::EntangleIterator(It first, It last)
     found[unit1] = true;
 
     /* Walk through all of the supplied bits and create a unique list to cohere. */
-    for (auto bit = first; bit != last; ++bit) {
+    for (auto bit = first + 1; bit != last; ++bit) {
         if (found.find(shards[**bit].unit) == found.end()) {
+            found[shards[**bit].unit] = true;
             units.push_back(shards[**bit].unit);
         }
     }
 
     /* Collapse all of the other units into unit1, returning a map to the new bit offset. */
-    auto &&offsets = unit1->Cohere(units);
+    if (units.size() != 0) {
+        auto &&offsets = unit1->Cohere(units);
 
-    /* Since each unit will be collapsed in-order, one set of bits at a time. */
-    for (auto &&shard : shards) {
-        auto search = offsets.find(shard.unit);
-        if (search != offsets.end()) {
-            shard.mapped += search->second;
-            shard.unit = unit1;
+        /* Since each unit will be collapsed in-order, one set of bits at a time. */
+        for (auto &&shard : shards) {
+            auto search = offsets.find(shard.unit);
+            if (search != offsets.end()) {
+                shard.mapped += search->second;
+                shard.unit = unit1;
+            }
         }
     }
 
@@ -159,33 +202,39 @@ QInterfacePtr QUnit::EntangleIterator(It first, It last)
     return unit1;
 }
 
+QInterfacePtr QUnit::Entangle(std::initializer_list<bitLenInt *> bits)
+{
+    return EntangleIterator(bits.begin(), bits.end());
+}
+
 QInterfacePtr QUnit::EntangleRange(bitLenInt start, bitLenInt length)
 {
     std::vector<bitLenInt> bits(length);
-    std::vector<bitLenInt *> ebits(length);
     for (auto i = 0; i < length; i++) {
         bits[i] = i + start;
-        ebits[i] = &bits[i];
     }
 
-    return EntangleIterator(ebits.begin(), ebits.end());
+    return EntangleIterator(&(bits.begin()), &(bits.end()));
 }
 
 QInterfacePtr QUnit::EntangleRange(bitLenInt start1, bitLenInt length1, bitLenInt start2, bitLenInt length2)
 {
     std::vector<bitLenInt> bits(length1 + length2);
-    std::vector<bitLenInt *> ebits(length1 + length2);
+
+    if (start1 > start2) {
+        std::swap(start1, start2);
+        std::swap(length1, length2);
+    }
+
     for (auto i = 0; i < length1; i++) {
         bits[i] = i + start1;
-        ebits[i] = &bits[i];
     }
 
     for (auto i = 0; i < length2; i++) {
         bits[i + length1] = i + start2;
-        ebits[i + length1] = &bits[i + length1];
     }
 
-    return EntangleIterator(ebits.begin(), ebits.end());
+    return EntangleIterator(&(bits.begin()), &(bits.end()));
 }
 
 /*
@@ -239,7 +288,7 @@ void QUnit::SortUnit(QInterfacePtr unit, std::vector<QSortEntry> &bits, bitLenIn
         if (i <= j) {
             unit->Swap(bits[i].mapped, bits[j].mapped); /* Change the location in the QE itself. */
             std::swap(shards[bits[i].bit].mapped, shards[bits[j].bit].mapped);     /* Change the global mapping. */
-            std::swap(bits[i], bits[j]);                /* Change the contents of the sorting array. */
+            std::swap(bits[i].mapped, bits[j].mapped);                /* Change the contents of the sorting array. */
             i++;
             j--;
         }
@@ -249,6 +298,14 @@ void QUnit::SortUnit(QInterfacePtr unit, std::vector<QSortEntry> &bits, bitLenIn
     }
     if (i < high) {
         SortUnit(unit, bits, i, high);
+    }
+}
+
+void QUnit::DumpShards()
+{
+    int i = 0;
+    for (auto shard : shards) {
+        printf("%2d.\t%p[%d]\n", i++, shard.unit.get(), shard.mapped);
     }
 }
 
@@ -583,7 +640,11 @@ void QUnit::INCxx(INCxxFn fn, bitCapInt toMod, bitLenInt start, bitLenInt length
      * FUTURE: If start[length] and carry are already in the same QE, then it
      * doesn't make sense to Decompose and re-entangle them.
      */
-    M(flag1Index);
+
+    /*
+     * Overflow flag should not be measured, however the carry flag still needs
+     * to be measured.
+     */
     M(flag2Index);
 
     EntangleRange(start, length);
@@ -695,8 +756,14 @@ void QUnit::PhaseFlip()
 unsigned char QUnit::SuperposeReg8(bitLenInt inputStart, bitLenInt outputStart, unsigned char* values)
 {
     const bitLenInt length = 8;
+
+    // TODO: This logic is overridden to demonstrate correct output from the lookup table search unit test. //
     EntangleRange(inputStart, length, outputStart, length);
+    //EntangleRange(outputStart, 2 * length);
     OrderContiguous(shards[inputStart].unit);
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 
     return shards[inputStart].unit->SuperposeReg8(shards[inputStart].mapped, shards[outputStart].mapped, values);
 }
