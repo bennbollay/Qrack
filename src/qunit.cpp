@@ -210,30 +210,31 @@ QInterfacePtr QUnit::Entangle(std::initializer_list<bitLenInt *> bits)
 QInterfacePtr QUnit::EntangleRange(bitLenInt start, bitLenInt length)
 {
     std::vector<bitLenInt> bits(length);
-    std::vector<bitLenInt *> ebits(length);
     for (auto i = 0; i < length; i++) {
         bits[i] = i + start;
-        ebits[i] = &bits[i];
     }
 
-    return EntangleIterator(ebits.begin(), ebits.end());
+    return EntangleIterator(&(bits.begin()), &(bits.end()));
 }
 
 QInterfacePtr QUnit::EntangleRange(bitLenInt start1, bitLenInt length1, bitLenInt start2, bitLenInt length2)
 {
     std::vector<bitLenInt> bits(length1 + length2);
-    std::vector<bitLenInt *> ebits(length1 + length2);
+
+    if (start1 > start2) {
+        std::swap(start1, start2);
+        std::swap(length1, length2);
+    }
+
     for (auto i = 0; i < length1; i++) {
         bits[i] = i + start1;
-        ebits[i] = &bits[i];
     }
 
     for (auto i = 0; i < length2; i++) {
         bits[i + length1] = i + start2;
-        ebits[i + length1] = &bits[i + length1];
     }
 
-    return EntangleIterator(ebits.begin(), ebits.end());
+    return EntangleIterator(&(bits.begin()), &(bits.end()));
 }
 
 /*
