@@ -31,10 +31,10 @@ QUnit::QUnit(QInterfaceEngine eng, bitLenInt qBitCount, bitCapInt initState, std
     }
 
     shards.resize(qBitCount);
-
-    for (auto &&shard : shards) {
-        shard.unit = CreateQuantumInterface(engine, engine, 1, 0, rand_generator);
-        shard.mapped = 0;
+    
+    for (bitLenInt i = 0; i < qBitCount; i++) {
+        shards[i].unit = CreateQuantumInterface(engine, engine, 1, ((1 << i) & initState) >> i, rand_generator);
+        shards[i].mapped = 0;
     }
 }
 
@@ -152,10 +152,11 @@ void QUnit::Dispose(bitLenInt start, bitLenInt length)
 void QUnit::Decompose(bitLenInt qubit)
 {
     std::shared_ptr<QInterface> unit = shards[qubit].unit;
+    bitCapInt permState = unit->MReg(0, unit->GetQubitCount());
     for (auto &&shard : shards) {
         if (shard.unit == unit) {
             shard.unit = CreateQuantumInterface(engine, engine, 1, 0, rand_generator);
-            shard.unit->SetBit(0, unit->M(shard.mapped));
+            shard.unit->SetBit(0, ((1 << shard.mapped) & permState) > 0);
             shard.mapped = 0;
         }
     }
@@ -223,6 +224,7 @@ QInterfacePtr QUnit::EntangleRange(bitLenInt start1, bitLenInt length1, bitLenIn
 {
     std::vector<bitLenInt> bits(length1 + length2);
     std::vector<bitLenInt *> ebits(length1 + length2);
+
     for (auto i = 0; i < length1; i++) {
         bits[i] = i + start1;
         ebits[i] = &bits[i];
