@@ -68,7 +68,6 @@ bool QEngineCPU::M(bitLenInt qubit)
     return result;
 }
 
-
 // Apply X ("not") gate to each bit in "length," starting from bit index
 // "start"
 void QEngineCPU::X(bitLenInt start, bitLenInt length)
