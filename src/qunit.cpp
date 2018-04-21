@@ -288,7 +288,7 @@ void QUnit::SortUnit(QInterfacePtr unit, std::vector<QSortEntry> &bits, bitLenIn
         }
         if (i <= j) {
             /* Note: Using the length variant to avoid a likely-temporary bug in the single-bit variant. */
-            unit->Swap(bits[i].mapped, bits[j].mapped, 1); /* Change the location in the QE itself. */
+            unit->Swap(bits[i].mapped, bits[j].mapped); /* Change the location in the QE itself. */
             std::swap(shards[bits[i].bit].mapped, shards[bits[j].bit].mapped);     /* Change the global mapping. */
             std::swap(bits[i].mapped, bits[j].mapped);                /* Change the contents of the sorting array. */
             i++;
